@@ -37,3 +37,4 @@ termux_agent_history.json
 .pytest_cache/
 .coverage
 htmlcov/
+tests/__pycache__/

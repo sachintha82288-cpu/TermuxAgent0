@@ -129,19 +129,9 @@ def main() -> int:
     if args.api_key:
         cfg["api_key"] = args.api_key
 
-    api_key = cfg.get("api_key")
-    if not api_key:
-        print(
-            "\n[!] No API key found. Set OPENAI_API_KEY or run:\n"
-            "    python main.py --setup\n"
-            "\nYou can use any OpenAI-compatible endpoint (OpenAI, Groq, OpenRouter,\n"
-            "Ollama, llama.cpp, Gemini via gateway, etc.) by setting OPENAI_BASE_URL.\n",
-            file=sys.stderr,
-        )
-        return 2
-
+    # Build the app (setup wizard can run without an API key).
     app = TermuxAgentApp(
-        api_key=api_key,
+        api_key=cfg.get("api_key", ""),
         base_url=cfg["base_url"].rstrip("/"),
         model=cfg["model"],
         system_prompt=cfg["system_prompt"],
@@ -152,6 +142,17 @@ def main() -> int:
     if args.setup:
         app.run_setup_wizard()
         return 0
+
+    api_key = cfg.get("api_key")
+    if not api_key:
+        print(
+            "\n[!] No API key found. Set OPENAI_API_KEY or run:\n"
+            "    python main.py --setup\n"
+            "\nYou can use any OpenAI-compatible endpoint (OpenAI, Groq, OpenRouter,\n"
+            "Ollama, llama.cpp, Gemini via gateway, etc.) by setting OPENAI_BASE_URL.\n",
+            file=sys.stderr,
+        )
+        return 2
 
     joined_prompt = " ".join(args.prompt).strip()
     if joined_prompt:

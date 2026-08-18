@@ -103,12 +103,24 @@ class TermuxAgentApp:
     def run_once(self, prompt: str) -> int:
         self.history.append({"role": "user", "content": prompt})
         try:
-            answer = self.client.chat(self.history, on_token=self._emit_token)
+            if self.client.stream:
+                answer = self.client.chat(
+                    self.history,
+                    on_token=self._emit_token,
+                    on_status=self._emit_status,
+                )
+                print()  # trailing newline after streamed output
+            else:
+                # In non-streaming, collect status only; render the final answer with Markdown.
+                answer = self.client.chat(
+                    self.history,
+                    on_token=None,
+                    on_status=self._emit_status,
+                )
+                self._render_answer(answer)
         except Exception as e:  # noqa: BLE001
             print(f"\n[!] Error: {e}", file=sys.stderr)
             return 1
-        if not self.client.stream:
-            self._render_answer(answer)
         self._save_history()
         return 0
 
@@ -143,19 +155,25 @@ class TermuxAgentApp:
 
             self.history.append({"role": "user", "content": user_input})
             try:
-                if self.console:
-                    self.console.print("\n[bold green]agent0[/bold green] ", end="")
-                else:
-                    print("\nagent0 ", end="", flush=True)
+                if self.client.stream:
+                    if self.console:
+                        self.console.print("\n[bold green]agent0[/bold green] ", end="")
+                    else:
+                        print("\nagent0 ", end="", flush=True)
 
-                collected: list[str] = []
-                answer = self.client.chat(self.history, on_token=lambda t: collected.append(t))
-                # If streaming, we've already printed; add a newline.
-                # If not, render full markdown.
-                if not self.client.stream:
-                    self._render_answer(answer)
-                else:
+                    self.client.chat(
+                        self.history,
+                        on_token=self._emit_token,
+                        on_status=self._emit_status,
+                    )
                     print()  # final newline after streamed text
+                else:
+                    answer = self.client.chat(
+                        self.history,
+                        on_token=None,
+                        on_status=self._emit_status,
+                    )
+                    self._render_answer(answer)
             except Exception as e:  # noqa: BLE001
                 # Roll back the user turn so the context stays clean
                 if self.history and self.history[-1].get("role") == "user":
@@ -172,11 +190,21 @@ class TermuxAgentApp:
 
     # ---------- helpers ----------
     def _emit_token(self, t: str) -> None:
-        if self.client.stream:
-            if self.console:
-                self.console.print(t, end="", highlight=False)
-            else:
-                print(t, end="", flush=True)
+        """Print a raw token from the LLM — escape Rich markup so brackets aren't eaten."""
+        if self.console:
+            safe = t.replace("[", "\\[").replace("]", "\\]")
+            self.console.print(safe, end="", highlight=False)
+        else:
+            print(t, end="", flush=True)
+
+    def _emit_status(self, t: str) -> None:
+        """Print an app-generated status line (tool notifications, etc.). Rich markup is preserved."""
+        if self.console:
+            self.console.print(t, end="", highlight=False)
+        else:
+            # Strip [dim]...[/dim] tags for plain-terminal output
+            plain = t.replace("[dim]", "").replace("[/dim]", "")
+            print(plain, end="", flush=True)
 
     def _render_answer(self, answer: str) -> None:
         if self.console and answer:

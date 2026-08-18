@@ -33,7 +33,12 @@ class LLMClient:
         msgs.extend(history)
         return msgs
 
-    def chat(self, history: list[dict], on_token: Callable[[str], None] | None = None) -> str:
+    def chat(
+        self,
+        history: list[dict],
+        on_token: Callable[[str], None] | None = None,
+        on_status: Callable[[str], None] | None = None,
+    ) -> str:
         """
         Send messages + run the tool-call loop.
 
@@ -101,8 +106,11 @@ class LLMClient:
                     "name": name,
                     "content": result,
                 })
-                if on_token:
-                    on_token(f"\n  🔧 [tool:{name}] → {result[:200]}{'…' if len(result) > 200 else ''}\n")
+                preview = result[:200] + ("…" if len(result) > 200 else "")
+                if on_status:
+                    on_status(f"\n  🔧 tool:{name} → {preview}\n")
+                elif on_token:
+                    on_token(f"\n  🔧 tool:{name} → {preview}\n")
 
         return "(tool-call loop reached maximum rounds; stopping.)"
 
