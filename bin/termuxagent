@@ -1,0 +1,19 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# Launcher for TermuxAgent0.
+# Resolves the repo root even when symlinked (e.g. ~/../usr/bin/termuxagent),
+# then runs the package with the user's Python.
+set -e
+
+SOURCE=$0
+while [ -L "$SOURCE" ]; do
+    DIR=$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)
+    SOURCE=$(readlink "$SOURCE")
+    case $SOURCE in
+        /*) ;;
+        *) SOURCE=$DIR/$SOURCE ;;
+    esac
+done
+ROOT=$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)
+
+PYTHON=${PYTHON:-python3}
+exec "$PYTHON" -m termuxagent "$@"
