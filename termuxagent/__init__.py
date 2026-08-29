@@ -1,6 +1,10 @@
-"""TermuxAgent0 — a small AI agent that lives in your terminal (Termux / Linux / macOS).
+"""TermuxAgent — a real AI agent that lives in your terminal.
 
-Standard library only; talks to any OpenAI-compatible Chat Completions API.
+Built for Termux (Android) but works on any Linux/macOS box with Python 3.8+.
+Standard library only: no pip installs, ever.  Talks to 27 OpenAI-compatible
+API providers (Groq, OpenAI, Gemini, OpenRouter, …) or local servers
+(Ollama, LM Studio, llama.cpp).
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
+APP_NAME = "TermuxAgent"

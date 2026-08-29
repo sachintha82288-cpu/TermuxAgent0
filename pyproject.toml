@@ -3,18 +3,19 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "termuxagent0"
-version = "0.1.0"
-description = "AI agent with shell and file tools that runs in Termux (stdlib only)"
+name = "termuxagent"
+version = "1.0.0"
+description = "A real AI agent that lives in your Termux terminal — 27 API providers, themed TUI, shell + file tools, pure stdlib"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [{ name = "sachintha82288-cpu" }]
-keywords = ["termux", "agent", "llm", "cli", "ai", "openai", "groq", "ollama"]
+keywords = ["termux", "agent", "llm", "cli", "ai", "groq", "openai", "ollama", "gemini"]
 classifiers = [
     "Environment :: Console",
-    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: Android",
     "Operating System :: POSIX",
     "Programming Language :: Python :: 3",
     "Topic :: Terminals",
@@ -22,7 +23,7 @@ classifiers = [
 dependencies = []
 
 [project.scripts]
-termuxagent = "termuxagent.__main__:main"
+agent = "termuxagent.cli:main"
 
 [tool.setuptools]
 packages = ["termuxagent"]

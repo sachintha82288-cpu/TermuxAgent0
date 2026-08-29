@@ -1,141 +1,168 @@
-# TermuxAgent0
+# TermuxAgent
 
-**An AI agent that lives in your Termux terminal.** Ask it in natural language;
-it plans, runs shell commands, reads/edits/writes files, checks the results and
-keeps going until the task is done.
+```
+████████╗ ███████╗ ██████╗  ███╗   ███╗ ██╗   ██╗ ██╗  ██╗
+╚══██╔══╝ ██╔════╝ ██╔══██╗ ████╗ ████║ ██║   ██║ ╚██╗██╔╝
+   ██║    █████╗   ██████╔╝ ██╔████╔██║ ██║   ██║  ╚███╔╝
+   ██║    ██╔══╝   ██╔══██╗ ██║╚██╔╝██║ ██║   ██║ ██╔██╗
+   ██║    ███████╗ ██║  ██║ ██║ ╚═╝ ██║ ╚██████╔╝ ██╔╝ ██╗
+   ╚═╝    ╚══════╝ ╚═╝  ╚═╝ ╚═╝     ╚═╝  ╚═════╝  ╚═╝  ╚═╝
+              █████╗   ██████╗  ███████╗ ███╗   ██╗ ████████╗
+             ██╔══██╗ ██╔════╝  ██╔════╝ ████╗  ██║ ╚══██╔══╝
+             ███████║ ██║  ███╗ █████╗   ██╔██╗ ██║    ██║
+             ██╔══██║ ██║   ██║ ██╔══╝   ██║╚██╗██║    ██║
+             ██║  ██║ ╚██████╔╝ ███████╗ ██║ ╚████║    ██║
+             ╚═╝  ╚═╝  ╚═════╝  ╚══════╝ ╚═╝  ╚═══╝    ╚═╝
+```
 
-- **100% standard library** — Python 3 only, no `pip install` of anything.
-- **Any OpenAI-compatible API** — Groq (free tier, fastest on phones),
-  OpenRouter, OpenAI, Together, or a local **Ollama** server.
-- **Streaming replies**, a tool-use agent loop, shell approval prompts,
-  conversation history that survives restarts, and an interactive REPL.
-- Works on Termux, Linux and macOS.
+**ඔබේ Termux terminal එක ඇතුළේ වැඩ කරන ඇත්ත AI Agent කෙනෙක්.**
+An AI agent that actually *lives* in your Termux terminal — it plans, runs
+shell commands, reads/edits files, checks results and keeps going until your
+task is done. Ask in **Sinhala or English**.
+
+- ⚡ **27 API providers built in** — Groq, OpenAI, Gemini, Claude, Grok,
+  DeepSeek, OpenRouter, Mistral, Cerebras, Ollama (local)… full list below
+- 🎨 **12 තේමා 12 themes** — neon, cyberpunk, matrix, dracula… සුපිරි banner +
+  gradients + arrow-key menus
+- 🛠 **Real tools** — `shell`, `read_file`, `write_file`, `edit_file`, `list_dir`
+  with safety checks and approve-before-run
+- 📦 **100% Python stdlib** — `pip install` අවශ්‍ය නෑ, python3 ප්‍රමාණවතයි
+- 🔄 Streaming replies, conversation history, ```run``` one-tap command blocks
+- 🇱🇰 Made for Termux, works on Linux & macOS too
 
 ---
 
-## Quick start (Termux) 🇱🇰
+## ⚡ Install (Termux)
 
 ```bash
 pkg update -y && pkg install -y git python
 git clone https://github.com/sachintha82288-cpu/TermuxAgent0.git
 cd TermuxAgent0
-sh install.sh          # Python check + 'termuxagent' command + setup wizard
+bash install.sh
 ```
 
-විශාර්ඩ් එකේදී provider එක තෝරන්න (Groq නොමිලේ, වේගවත්), API key එක දාන්න
-(https://console.groq.com/keys — නොමිලේ ගන්න පුළුවන්), ඊට පස්සේ:
+One-liner install:
 
 ```bash
-termuxagent           # chat එක start කරන්න
-termuxagent "මේ folder එකේ තියෙන files මොනවාද කියලා බලලා විස්තර කරන්න"
-termuxagent -y "python ප්‍රොජෙක්ට් එකක් scaffold කරලා tests run කරන්න"
+curl -fsSL https://raw.githubusercontent.com/sachintha82288-cpu/TermuxAgent0/main/install.sh | bash
 ```
 
-> **Local & private?** Use Ollama: pick provider 4 in `--setup`, run
-> `termux-setup-storage` + `ollama serve` on your machine, no API key needed.
+Install වුණාම **Termux එකේ `Agent` type කරන්න** — agent එක open වෙනවා
+(`agent` වලිනුත් පුළුවන්). First run එකේදීම setup wizard එක එයි:
 
-## Install (Linux / macOS)
+1. **Provider එක තෝරන්න** — `Groq` recommend කරනවා (නොමිලේ, ගොඩක් වේගවත්)
+2. **API key එක paste කරන්න** — [console.groq.com/keys](https://console.groq.com/keys)
+   එකෙන් නොමිලේ ගන්න පුළුවන්
+3. **Model එක තෝරන්න** — list එක automatically එනවා
+4. **Theme එක තෝරන්න** — live preview එකක් එක්කම
+
+Done! `Agent` type කරලා chat කරන්න. 🎉
+
+## 🚀 Use
+
+```bash
+Agent                    # chat start කරන්න  (ලොකු A එකෙන් හෝ පොඩි එකෙන්)
+Agent ask "battery status එක බලලා කියන්න" -y     # one-shot mode
+Agent setup              # provider / key / model / theme මාරු කරන්න
+Agent doctor             # ප්‍රශ්නයක් තියෙනවද බලන්න
+Agent providers          # සියලු providers 27 බලන්න
+Agent theme cyberpunk    # theme එක මාරු කරන්න
+```
+
+Chat එක ඇතුළේ:
+
+| Command | වැඩේ |
+|---|---|
+| `/help` | සියලු commands |
+| `/provider` | API provider එක මාරු කරන්න (27) |
+| `/model`, `/models` | model එක මාරු කරන්න / list එක බලන්න |
+| `/theme` | theme එක මාරු කරන්න (live preview) |
+| `/tools`, `/auto` | tools on/off · auto-approve on/off |
+| `/new`, `/save` | අලුත් chat · markdown export |
+| `!ls -la` | shell command එකක් direct run කරන්න |
+| `/exit` | පිටවෙන්න (history auto-save වෙනවා) |
+
+### උදාහරණ
+
+```text
+you ❯ මේ folder එකේ python project එකක් හදලා test run කරන්න
+  🔧 shell python3 -m venv .venv && .venv/bin/pip install pytest
+  🔧 write_file calculator.py (214 chars)
+  🔧 shell .venv/bin/python -m pytest -q
+calculator project ready ✓ — 5 tests passed
+```
+
+## ☁ Supported providers (27)
+
+| Cloud | Local / Custom |
+|---|---|
+| Groq · OpenAI · Anthropic (Claude) · Google Gemini · xAI (Grok) · DeepSeek · OpenRouter · Mistral · Together AI · Cerebras · SambaNova · Fireworks · Perplexity · Hyperbolic · Novita · Lambda · Moonshot (Kimi) · Alibaba Qwen · Cohere · NVIDIA NIM · Hugging Face · Glama · Chutes | Ollama · LM Studio · llama.cpp · **Custom** (ඕනම OpenAI-compatible URL එකක්) |
+
+මාරු කරන්න: `Agent provider groq` · `Agent provider ollama` · ඕනම එකක්.
+Local (Ollama/LM Studio) වලට API key ඕන නෑ — සම්පූර්ණයෙන්ම private.
+
+## 🛠 What the agent can do
+
+Model එට call කරන්න පුළුවන් tools (OpenAI function calling):
+
+- **`shell`** — Termux එකේ command run කරනවා (`pkg install`, `git`,
+  `termux-battery-status`, `termux-notification`…) — කලින් confirm කරනවා
+- **`read_file` / `write_file` / `edit_file` / `list_dir`** — file operations
+  (overwrite කරන්න කලින් `.bak` backup එකක් තියෙනවා)
+
+Safety:
+
+- විනාශකාරී commands (`rm -rf /`, `mkfs`, `shutdown`…) block වෙනවා
+- shell/write actions වලට ඔබගේ approval එක ඕන (`-y` / `/auto` වලින් skip කරන්න පුළුවන්)
+- API keys `~/.termux-agent/config.json` එකේ `chmod 600` එකෙන් save වෙනවා
+- Tool function calling support නැති providers (Perplexity) වලට ```run``` blocks එකෙන් one-tap execution තියෙනවා
+
+## 🖥 Linux / macOS
 
 ```bash
 git clone https://github.com/sachintha82288-cpu/TermuxAgent0.git
 cd TermuxAgent0
-python3 -m termuxagent --setup     # writes ~/.termuxagent/config.json
-bin/termuxagent                    # or: python3 -m termuxagent
+bash install.sh        # installs ~/.local/bin/agent + Agent
 ```
 
-Optional: symlink the launcher onto your PATH:
+නැත්තම් repo එකෙන් direct: `python3 run.py` හෝ `python3 -m termuxagent`.
+
+## 🎨 Themes
+
+`neon` (default) · `cyberpunk` · `matrix` · `dracula` · `nord` · `sunset` ·
+`ocean` · `sakura` · `ruby` · `gold` · `vaporwave` · `mono`
 
 ```bash
-ln -s "$PWD/bin/termuxagent" ~/.local/bin/termuxagent
+Agent theme matrix     # හෝ chat එක ඇතුළේ /theme
 ```
 
-## Usage
-
-```
-termuxagent [options] [prompt]
-
-  (no prompt)            start the interactive REPL
-  "do something"         one-shot mode: run the task, print the answer, exit
-  -y, --yes              auto-approve shell commands (needed in one-shot mode)
-  -C, --chdir PATH       work in this directory
-  -m, --model NAME       override the model for this run
-  --base-url URL         override the API endpoint
-  --no-tools             plain chat, no shell/file access
-  --resume               load the last saved conversation
-  --setup                re-run the configuration wizard
-  --version
-```
-
-Environment variables (override the config file):
-`TERMUXAGENT_API_KEY`, `TERMUXAGENT_BASE_URL`, `TERMUXAGENT_MODEL`,
-`TERMUXAGENT_HOME` (config/history directory, default `~/.termuxagent`).
-
-### REPL commands
-
-| Command        | What it does                                         |
-|----------------|------------------------------------------------------|
-| `/help`        | list commands                                        |
-| `/reset`       | forget the current conversation                      |
-| `/history`     | message count in session                             |
-| `/cd PATH`     | change the working directory tools operate in        |
-| `/auto`        | toggle auto-approve for shell commands               |
-| `/model NAME`  | switch model                                         |
-| `/config`      | show current config (key masked)                     |
-| `/save`        | persist conversation now (also auto-saved on exit)   |
-| `/clear`       | wipe saved history from disk                         |
-| `/exit`        | quit                                                 |
-
-## What the agent can do
-
-Tools the model may call (OpenAI-style function tools):
-
-- **`shell`** — runs a command via your shell (`sh`/`bash`/`$SHELL`), returns
-  stdout, stderr and exit code. In the REPL, shell commands ask for approval
-  first (`y` = once, `a` = always this session); in one-shot mode they are
-  denied unless you pass `-y`.
-- **`read_file`** — read a text file (large files truncated).
-- **`write_file`** — create/overwrite a file (parent dirs created).
-- **`edit_file`** — exact, unique find-and-replace (ambiguous edits rejected).
-- **`list_dir`** — directory listing with directories marked.
-
-The loop is capped at 12 tool steps per request; every tool error is returned
-to the model as a message so it can recover instead of crashing.
-
-## Safety
-
-- Shell is the only destructive tool and it is gated behind an approval prompt
-  by default (and fully blocked in non-interactive one-shot mode without `-y`).
-- Your API key is stored in `~/.termuxagent/config.json` with `chmod 600`.
-- Tools operate relative to the working directory; the agent never asks you
-  for credentials.
-- Review what it runs: every tool call is printed (`  . shell: ...`) before
-  execution.
-
-## Project layout
+## 📁 Project layout
 
 ```
 termuxagent/
-  __init__.py     version
-  __main__.py     CLI entry point (python -m termuxagent)
-  config.py       config JSON, storage paths, setup wizard
-  history.py      conversation persistence
-  llm.py          OpenAI-compatible streaming client (stdlib urllib)
-  tools.py        shell + read/write/edit/list tools and JSON schemas
-  agent.py        the tool-use agent loop
-  repl.py         interactive REPL with slash commands
-  ui.py           tiny colour/output helpers
-bin/termuxagent   launcher script
-install.sh        Termux/Linux installer
-tests/            unittest suite (27 tests, no network)
+  theme.py       12 themes · gradients · block-letter banners · boxes
+  providers.py   27-provider catalogue (URLs, key links, defaults)
+  ui.py          arrow-key menus · spinner · styled prompts
+  setup.py       first-run wizard (provider → key → model → theme)
+  config.py      ~/.termux-agent/config.json (chmod 600)
+  llm.py         streaming OpenAI-compatible client (stdlib urllib)
+  tools.py       shell/file tools + safety blocklist
+  agent.py       the tool-use agent loop
+  repl.py        interactive chat · slash commands · ```run``` blocks
+  cli.py         agent setup|ask|providers|doctor|theme|model|config|uninstall
+run.py           bootstrap launcher
+install.sh       installs `agent` + `Agent` commands
+tests/           24 tests incl. a mock OpenAI server (no network)
 ```
 
-## Development
+## 🔧 Development
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-No third-party dependencies are needed to run or test.
+No dependencies, no network needed for tests (a mock OpenAI-compatible
+server exercises streaming + tool calls end to end).
 
 ## License
 

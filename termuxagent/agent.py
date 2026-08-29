@@ -1,146 +1,208 @@
-"""The agentic loop: send messages → model asks for tools → run them → repeat."""
+"""The agentic loop: user → model → tool calls → results → repeat."""
 from __future__ import annotations
 
 import json
+import os
 import platform
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Callable, List, Optional
 
 from . import __version__
 from .config import Config
-from .history import save_history
 from .llm import LLMError, chat
-from .tools import call_tool, get_tool_specs
+from .tools import READ_ONLY, ToolError, call_tool, specs, summarize
 
 MAX_ITERATIONS = 12
 
-# Called with (tool_name, arguments_dict) when the model requests a tool.
-# Return True to allow it, False to deny.  Default: allow everything.
-ApprovalCallback = Callable[[str, dict], bool]
-# Called with (tool_name, arguments_dict) just before a tool runs (for display).
-AnnounceCallback = Callable[[str, dict], None]
+# approve(name, args) → bool ; announce(name, args, result=None)
+ApproveFn = Callable[[str, dict], bool]
+AnnounceFn = Callable[[str, dict], None]
 
 
-def build_system_prompt(workdir: Path, cfg: Config) -> str:
-    parts = [
-        f"You are TermuxAgent0 v{__version__}, a helpful AI coding and shell "
-        "assistant running inside a terminal on the user's own device.",
-        f"Environment: {platform.system()} {platform.release()} on {platform.machine()}.",
-        f"Working directory: {workdir}",
-        "Shell: POSIX sh (on Termux use 'pkg' to install packages).",
-        "",
-        "How to work:",
-        "- You have tools: shell, read_file, write_file, edit_file, list_dir.",
-        "- Explore before acting: use list_dir/read_file to understand the "
-        "context instead of guessing.",
-        "- Take real action with the tools; verify results with shell or "
-        "read_file afterwards.",
-        "- Make changes in small, reversible steps. When a command or edit "
-        "fails, read the error and adjust.",
-        "- Shell commands that modify the system (installs, deletes, git push) "
-        "may be shown to the user for approval.",
-        "- Keep replies concise. Report what you did and any problems left.",
-        "- Never ask for API keys, passwords or tokens; the environment is "
-        "already configured.",
+def _env_block() -> str:
+    is_termux = "com.termux" in os.environ.get("PREFIX", "")
+    shell = os.environ.get("SHELL") or "sh"
+    try:
+        kernel = subprocess.run(["uname", "-o", "-r"], capture_output=True,
+                                text=True, timeout=5).stdout.strip()
+    except Exception:
+        kernel = f"{platform.system()} {platform.release()}"
+    lines = [
+        f"- device: {kernel or platform.platform()}",
+        f"- termux: {'yes' if is_termux else 'no'}",
+        f"- shell: {shell}   python: {platform.python_version()}",
+        f"- termux-api CLI: "
+        + ("installed" if shutil.which("termux-battery-status") else
+           "not installed (suggest 'pkg install termux-api' when needed)"),
     ]
-    if cfg.system_prompt_extra:
-        parts.append("")
-        parts.append(cfg.system_prompt_extra)
+    return "\n".join(lines)
+
+
+def build_system_prompt(cfg: Config, workdir: Path, tools_on: bool) -> str:
+    parts = [
+        f"You are TermuxAgent v{__version__} — a REAL AI agent running inside "
+        f"the user's terminal. You don't just talk: you use tools to actually "
+        f"do things on the device.",
+        "",
+        "ENVIRONMENT",
+        _env_block(),
+        f"- working directory: {workdir}",
+        "",
+        "HOW TO WORK",
+        "- If the request can be done on this device, DO it with tools instead "
+        "of only explaining.",
+        "- Explore first (list_dir/read_file) when files are involved; then act; "
+        "then verify the result.",
+        "- On Termux install packages with 'pkg install -y <name>'.",
+        "- Destructive or risky actions are shown to the user for approval — "
+        "that's automatic, just proceed.",
+        "- When a command fails, read the error and adapt (install a missing "
+        "dependency, fix the path, ...) before giving up.",
+        "- Keep answers short and terminal-friendly: plain text, short bullets. "
+        "No giant tables. Reply in the user's language (Sinhala → Sinhala).",
+        "- Never pretend you ran something you didn't; tool output is the truth.",
+        "- Never ask the user for their API key or passwords.",
+    ]
+    if tools_on:
+        parts.append("- Tools available: shell, read_file, write_file, "
+                     "edit_file, list_dir.")
+    else:
+        parts.append(
+            "- You have NO tool access in this session. When something should "
+            "be run on the device, put the command in a ```run code fence — "
+            "the terminal will offer to execute it.")
+    if cfg.data.get("system_extra"):
+        parts += ["", "USER INSTRUCTIONS", cfg.data["system_extra"]]
     return "\n".join(parts)
 
 
 class Agent:
-    def __init__(
-        self,
-        cfg: Config,
-        workdir: Optional[Path] = None,
-        on_content: Optional[Callable[[str], None]] = None,
-        approve: Optional[ApprovalCallback] = None,
-        announce: Optional[AnnounceCallback] = None,
-    ) -> None:
+    """One conversation: system prompt + messages + the tool loop."""
+
+    def __init__(self, cfg: Config, workdir: Optional[Path] = None,
+                 on_content: Optional[Callable[[str], None]] = None,
+                 on_reasoning: Optional[Callable[[str], None]] = None,
+                 approve: Optional[ApproveFn] = None,
+                 announce: Optional[AnnounceFn] = None,
+                 tools_on: Optional[bool] = None) -> None:
         self.cfg = cfg
         self.workdir = (workdir or Path.cwd()).resolve()
         self.on_content = on_content
+        self.on_reasoning = on_reasoning
         self.approve = approve or (lambda name, args: True)
         self.announce = announce or (lambda name, args: None)
-        self.messages: List[dict] = [
-            {"role": "system", "content": build_system_prompt(self.workdir, cfg)}
-        ]
-        self.tools = get_tool_specs(cfg.tools_enabled)
+        self.tools_on = cfg.tools_enabled() if tools_on is None else tools_on
+        self.usage_total = {"prompt_tokens": 0, "completion_tokens": 0}
+        self.messages: List[dict] = []
 
-    # ------------------------------------------------------------- history
-    def load_history(self, messages: List[dict]) -> None:
-        """Append prior conversation (list of role/content messages)."""
-        self.messages.extend(messages)
+    def new_session(self) -> None:
+        self.messages = [{
+            "role": "system",
+            "content": build_system_prompt(self.cfg, self.workdir, self.tools_on),
+        }]
 
-    def persist(self) -> None:
-        save_history(self.messages)
+    def load_messages(self, messages: List[dict]) -> None:
+        self.new_session()
+        for m in messages:
+            if m.get("role") in ("user", "assistant") and m.get("content"):
+                self.messages.append({"role": m["role"], "content": m["content"]})
 
-    def reset(self) -> None:
-        self.messages = [self.messages[0]]  # keep system prompt
+    # ------------------------------------------------------------------ core
+    def _call_llm(self) -> dict:
+        return chat(
+            base_url=self.cfg.base_url(),
+            api_key=self.cfg.api_key(),
+            model=self.cfg.model(),
+            messages=self.messages,
+            tools=specs() if self.tools_on else None,
+            timeout=self.cfg.data["timeout"],
+            stream=self.cfg.data["stream"],
+            temperature=self.cfg.data["temperature"],
+            extra_headers=self.cfg.provider.get("headers"),
+            on_content=self.on_content,
+            on_reasoning=self.on_reasoning if self.cfg.data["show_reasoning"] else None,
+        )
 
-    # -------------------------------------------------------------- loop
     def chat(self, user_text: str) -> str:
-        """Send *user_text* and run the tool loop; return final assistant text."""
+        """One user turn → run the tool loop → final assistant text."""
         self.messages.append({"role": "user", "content": user_text})
+        try:
+            return self._loop()
+        except LLMError:
+            self.messages.pop()  # keep the conversation usable
+            raise
 
+    def _loop(self) -> str:
         for _ in range(MAX_ITERATIONS):
-            try:
-                response = chat(
-                    base_url=self.cfg.base_url,
-                    api_key=self.cfg.api_key,
-                    model=self.cfg.model,
-                    messages=self.messages,
-                    tools=self.tools,
-                    timeout=self.cfg.timeout,
-                    stream=True,
-                    on_content=self.on_content,
-                )
-            except LLMError as exc:
-                # Drop the pending user turn so the conversation stays usable.
-                self.messages.pop()
-                raise LLMError(str(exc)) from exc
-
-            # Some providers stream content after tool calls; keep it tidy.
-            if response.get("tool_calls") and response.get("content"):
-                if self.on_content:
-                    self.on_content("\n")
+            response = self._call_llm()
+            self._track_usage()
             if response.get("content") is None:
                 response["content"] = ""
-
             if not response.get("tool_calls") and not response["content"].strip():
-                # Drop the pending user turn so the conversation stays usable.
-                self.messages.pop()
-                raise LLMError("the model returned an empty response (connection problem or unsupported model?)")
-
+                raise LLMError("the model returned an empty response "
+                               "(connection problem or unsupported model?)")
             self.messages.append(response)
             tool_calls = response.get("tool_calls")
             if not tool_calls:
                 return response.get("content", "")
-
             for call in tool_calls:
-                fn = call.get("function", {})
-                name = fn.get("name", "")
-                raw_args = fn.get("arguments", "") or "{}"
+                self._run_one_tool(call)
+        return ("[stopped] the agent hit the maximum number of tool steps "
+                f"({MAX_ITERATIONS}) for one request.")
+
+    def _run_one_tool(self, call: dict) -> None:
+        fn = call.get("function", {})
+        name = fn.get("name", "")
+        raw = fn.get("arguments", "") or "{}"
+        try:
+            args = json.loads(raw) if isinstance(raw, str) else raw
+            if not isinstance(args, dict):
+                raise ValueError("arguments must be an object")
+        except (json.JSONDecodeError, ValueError) as exc:
+            args = {}
+            result = f"[error] invalid tool arguments: {exc}: {raw[:200]}"
+        else:
+            self.announce(name, args)
+            allowed = (name in READ_ONLY or self.cfg.data["auto_approve"]
+                       or self.approve(name, args))
+            if not allowed:
+                result = "[denied by user]"
+            else:
                 try:
-                    args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                except json.JSONDecodeError:
-                    args = {}
-                    result = f"[error] tool arguments were not valid JSON: {raw_args[:200]}"
-                else:
-                    self.announce(name, args)
-                    if not self.approve(name, args):
-                        result = "[denied by user]"
-                    else:
-                        result = call_tool(name, args, self.cfg, self.workdir)
+                    result = call_tool(name, args,
+                                       self.cfg.data["shell_timeout"],
+                                       self.workdir)
+                except ToolError as exc:
+                    result = f"[error] {exc}"
+        self.messages.append({"role": "tool", "tool_call_id": call.get("id", ""),
+                              "name": name, "content": result})
 
-                self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.get("id", ""),
-                        "name": name,
-                        "content": result,
-                    }
-                )
+    def _track_usage(self) -> None:
+        # cheap approximation when providers don't return usage
+        for m in self.messages[-1:]:
+            content = m.get("content") or ""
+            self.usage_total["completion_tokens"] += len(content) // 4
 
-        return "[error] agent stopped after reaching the maximum number of tool steps."
+    # ------------------------------------------------------------------ misc
+    def reset(self) -> None:
+        self.new_session()
+
+    def export_markdown(self) -> str:
+        lines = [f"# TermuxAgent chat — {self.cfg.model()}",
+                 "", f"- provider: {self.cfg.provider['name']}",
+                 f"- model: {self.cfg.model()}", ""]
+        for m in self.messages:
+            role = m.get("role", "?")
+            if role == "system":
+                continue
+            if role == "tool":
+                lines.append(f"```tool {m.get('name', '')}\n{m.get('content', '')}\n```")
+            elif role == "assistant" and m.get("tool_calls"):
+                for tc in m["tool_calls"]:
+                    fn = tc.get("function", {})
+                    lines.append(f"> 🔧 **{fn.get('name')}** `{fn.get('arguments')}`")
+            else:
+                lines.append(f"## {role}\n\n{m.get('content', '')}\n")
+        return "\n".join(lines)
