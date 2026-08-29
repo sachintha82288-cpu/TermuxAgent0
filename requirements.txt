@@ -1,2 +1,0 @@
-# TermuxAgent0 uses only the Python 3 standard library — no pip installs needed.
-# Python 3.9+ recommended (3.11+ on Termux).
