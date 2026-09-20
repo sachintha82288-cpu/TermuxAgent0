@@ -58,12 +58,17 @@ def _enter_key(cfg: Config, p: dict) -> bool:
                              (f" (or set ${p['key_env']})" if p.get("key_env") else "") + ":")
         except (EOFError, KeyboardInterrupt):
             return False
+        key = key.strip().strip("'\"")  # pasted with quotes / trailing space
         if not key:
             if confirm("Skip for now? (you can add it later with: agent setup)",
                        default=False):
                 return False
             continue
+        if " " in key or len(key) < 8:
+            warn("that doesn't look like an API key — please paste it again.")
+            continue
         cfg.set_key(p["id"], key)
+        success(f"key received: {cfg.masked_key()}")
         return True
     return False
 
@@ -75,7 +80,7 @@ def _pick_model(cfg: Config, p: dict, test_key: bool) -> str:
         with Spinner(f"testing connection → {p['name']}"):
             try:
                 fetched = list_models(cfg.base_url(), cfg.api_key(),
-                                      headers=p.get("headers"))
+                                      headers=cfg.headers())
             except LLMError:
                 fetched = []
     if fetched:
@@ -88,14 +93,17 @@ def _pick_model(cfg: Config, p: dict, test_key: bool) -> str:
     default_model = cfg.data["models"].get(p["id"]) or p.get("default_model") or ""
     if default_model and default_model not in candidates:
         candidates = [default_model] + candidates
-    if p["id"] == "custom" and not candidates:
-        return ask("Model name", "")
+    if not candidates:  # custom / LM Studio / llama.cpp with nothing loaded
+        if p["id"] in ("lmstudio", "llamacpp"):
+            info("no models reported by the server — load one there, or type "
+                 "its name now (you can change it later with /model).")
+        return ask("Model name", default_model)
 
     capped = candidates[:40]
     labels = [m + ("   (default)" if m == default_model else "") for m in capped]
     labels.append(paint("✎  type a model name manually…", "accent"))
     idx = select(f"Model for {p['name']}", labels,
-                 index=0 if default_model == capped[0] else 0)
+                 index=capped.index(default_model) if default_model in capped else 0)
     if idx is None or idx == len(labels) - 1:
         return ask("Model name", default_model)
     return capped[idx]
@@ -111,7 +119,7 @@ def _pick_theme(cfg: Config) -> str:
 
     names = list(THEMES)
     idx = select("Pick a theme (see live preview below)", names,
-                 index=names.index(cfg.data.get("theme", "neon")), preview=preview)
+                 index=names.index(cfg.data.get("theme", "neon")) if cfg.data.get("theme") in names else 0, preview=preview)
     chosen = names[idx] if idx is not None else cfg.data.get("theme", "neon")
     set_theme(chosen)
     return chosen
@@ -132,11 +140,15 @@ def run_setup(cfg: Config, first_run: bool = False) -> Config:
         warn("Setup cancelled — nothing saved.")
         return cfg
 
-    if p["id"] == "custom":
-        url = ask("Base URL (e.g. http://192.168.1.5:8080/v1)", cfg.base_url())
-        cfg.data["custom_base_urls"]["custom"] = url.rstrip("/")
-
     cfg.data["provider"] = p["id"]
+    if p["id"] == "custom":
+        while True:
+            url = ask("Base URL (e.g. http://192.168.1.5:8080/v1)",
+                      cfg.base_url()).strip().rstrip("/")
+            if url.startswith(("http://", "https://")):
+                break
+            warn("the URL must start with http:// or https://")
+        cfg.data["custom_base_urls"]["custom"] = url
     got_key = _enter_key(cfg, p)
 
     model = _pick_model(cfg, p, test_key=got_key or p.get("needs_key") is False)

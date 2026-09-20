@@ -89,16 +89,28 @@ def _interactive() -> bool:
 
 def _read_key() -> str:
     ch = sys.stdin.read(1)
+    if ch == "":
+        raise EOFError
     if ch != "\x1b":
         return ch
     import select as _select
     if not _select.select([sys.stdin], [], [], 0.05)[0]:
         return "ESC"
     nxt = sys.stdin.read(1)
-    if nxt != "[":
+    if nxt not in ("[", "O"):
         return "ESC"
     code = sys.stdin.read(1)
-    return {"A": "UP", "B": "DOWN", "C": "RIGHT", "D": "LEFT"}.get(code, "ESC")
+    if code.isdigit():                      # \x1b[1~ (home)  \x1b[4~ (end) …
+        num = code
+        while _select.select([sys.stdin], [], [], 0.05)[0]:
+            c = sys.stdin.read(1)
+            if c == "~" or not c.isdigit():
+                break
+            num += c
+        return {"1": "HOME", "7": "HOME", "4": "END", "8": "END",
+                "5": "PGUP", "6": "PGDN"}.get(num, "ESC")
+    return {"A": "UP", "B": "DOWN", "C": "RIGHT", "D": "LEFT",
+            "H": "HOME", "F": "END"}.get(code, "ESC")
 
 
 def select(title: str, options: List[str], index: int = 0,
@@ -108,7 +120,13 @@ def select(title: str, options: List[str], index: int = 0,
     if not options:
         return None
 
-    if not _interactive():  # numbered fallback for pipes / CI
+    try:
+        import termios
+        import tty
+    except ImportError:  # Windows / exotic platforms → numbered menu
+        termios = tty = None
+
+    if not _interactive() or termios is None:  # numbered fallback for pipes / CI
         print(paint(title, "secondary", bold=True))
         for i, opt in enumerate(options, 1):
             marker = theme.paint(">", "accent", bold=True) if i - 1 == index else " "
@@ -126,23 +144,33 @@ def select(title: str, options: List[str], index: int = 0,
             if raw.lower() == "q":
                 return None
 
-    import termios
-    import tty
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
+    visible = min(len(options), max(4, theme.term_height() - (8 if preview else 4)))
+    top = 0
     cur = max(0, min(index, len(options) - 1))
     width = theme.term_width()
     last_lines: List[str] = []
 
     def render() -> List[str]:
+        nonlocal top
+        if cur < top:
+            top = cur
+        elif cur >= top + visible:
+            top = cur - visible + 1
         lines = [paint(title, "secondary", bold=True)]
-        for i, opt in enumerate(options):
+        if top > 0:
+            lines.append(paint(f"  ↑ {top} more", "muted"))
+        for i in range(top, min(len(options), top + visible)):
+            opt = options[i]
             mark = paint("❯ ", "accent", bold=True) if i == cur else "  "
             name = theme.truncate(opt, width - 6)
             if i == cur:
                 lines.append(mark + paint(name, "primary", bold=True))
             else:
                 lines.append(mark + paint(name, "muted"))
+        if top + visible < len(options):
+            lines.append(paint(f"  ↓ {len(options) - top - visible} more", "muted"))
         if preview:
             lines.append("")
             lines.extend(preview(cur))
@@ -169,6 +197,10 @@ def select(title: str, options: List[str], index: int = 0,
                 cur = 0
             elif key in ("END", "G"):
                 cur = len(options) - 1
+            elif key == "PGUP":
+                cur = max(0, cur - visible)
+            elif key == "PGDN":
+                cur = min(len(options) - 1, cur + visible)
             elif key.isdigit() and 1 <= int(key) <= min(9, len(options)):
                 cur = int(key) - 1
             elif key in ("\r", "\n", " ", "RIGHT"):
@@ -189,7 +221,7 @@ def select(title: str, options: List[str], index: int = 0,
                 sys.stdout.write("\033[J")
             sys.stdout.flush()
             last_lines = lines
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
         return None
     finally:
         try:

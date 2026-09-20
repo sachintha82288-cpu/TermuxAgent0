@@ -152,8 +152,19 @@ termuxagent/
   cli.py         agent setup|ask|providers|doctor|theme|model|config|uninstall
 run.py           bootstrap launcher
 install.sh       installs `agent` + `Agent` commands
-tests/           24 tests incl. a mock OpenAI server (no network)
+tests/           30 tests incl. a mock OpenAI server (no network)
 ```
+
+## 🩺 Troubleshooting
+
+| ප්‍රශ්නය | විසඳුම |
+|---|---|
+| `agent: command not found` | අලුත් terminal එකක් open කරන්න (installer එක PATH එක `~/.bashrc` එකට add කරනවා) හෝ `python3 ~/.termux-agent/app/run.py` |
+| `HTTP 401 — invalid API key?` | `agent setup` run කරලා key එක නැවත paste කරන්න (quotes නැතුව) |
+| `cannot reach …` | internet එක බලන්න · local provider එකක් නම් `ollama serve` run කරන්න |
+| `command timed out … waiting for input` | agent එකේ shell එකට keyboard එකක් නෑ — `-y` වගේ non-interactive flags යොදන්න |
+| chat එක Ctrl+C වලින් නැවතුනා | තව එකක් ඔබන්න exit වෙන්න; එකක් නම් line එක clear වෙනවා විතරයි |
+| විස්තර: `agent doctor` | config, key, model, API reachability එකවර check කරනවා |
 
 ## 🔧 Development
 

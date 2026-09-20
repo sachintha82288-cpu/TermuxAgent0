@@ -1,4 +1,4 @@
-"""Configuration storage — ``~/.termuxagent/config.json`` (chmod 600).
+"""Configuration storage — ``~/.termux-agent/config.json`` (chmod 600).
 
 The file keeps per-provider API keys and model choices plus theme and agent
 options.  Environment overrides: ``TERMUXAGENT_API_KEY``, ``TERMUXAGENT_MODEL``,
@@ -32,9 +32,33 @@ DEFAULTS: Dict = {
 }
 
 
+LEGACY_HOME_NAME = ".termuxagent"     # pre-1.0.1 location (typo'd name)
+HOME_NAME = ".termux-agent"           # matches install.sh / README / uninstall.sh
+
+
 def storage_home() -> Path:
+    """``~/.termux-agent`` (or ``$TERMUXAGENT_HOME``).
+
+    Older versions stored everything in ``~/.termuxagent`` while the installer
+    and docs used ``~/.termux-agent`` — so uninstall missed the config and the
+    README pointed at a file that did not exist.  Migrate silently once.
+    """
     custom = os.environ.get("TERMUXAGENT_HOME")
-    return Path(custom).expanduser() if custom else Path.home() / ".termuxagent"
+    if custom:
+        return Path(custom).expanduser()
+    home = Path.home() / HOME_NAME
+    legacy = Path.home() / LEGACY_HOME_NAME
+    if legacy.is_dir() and not (home / "config.json").exists():
+        try:
+            home.mkdir(parents=True, exist_ok=True)
+            for name in ("config.json", "history.json", "last-session.json",
+                         "input-history"):
+                src = legacy / name
+                if src.exists() and not (home / name).exists():
+                    src.replace(home / name)
+        except OSError:
+            pass
+    return home
 
 
 def config_path() -> Path:
@@ -69,9 +93,29 @@ class Config:
                 raw = {}
         cfg = cls(raw)
         cfg._apply_env()
+        cfg._normalise()
         return cfg
 
+    def _normalise(self) -> None:
+        """Repair values a hand-edited config may have broken."""
+        from .theme import THEMES
+        if self.data.get("theme") not in THEMES:
+            self.data["theme"] = DEFAULTS["theme"]
+        for key in ("api_keys", "models", "custom_base_urls"):
+            if not isinstance(self.data.get(key), dict):
+                self.data[key] = {}
+        for key in ("timeout", "shell_timeout", "max_steps"):
+            try:
+                self.data[key] = max(1, int(self.data[key]))
+            except (TypeError, ValueError):
+                self.data[key] = DEFAULTS[key]
+        try:
+            self.data["temperature"] = float(self.data["temperature"])
+        except (TypeError, ValueError):
+            self.data["temperature"] = DEFAULTS["temperature"]
+
     def _apply_env(self) -> None:
+        """Environment overrides (never written back to disk)."""
         env_key = os.environ.get("TERMUXAGENT_API_KEY")
         env_model = os.environ.get("TERMUXAGENT_MODEL")
         env_provider = os.environ.get("TERMUXAGENT_PROVIDER")
@@ -122,6 +166,15 @@ class Config:
             if env_name:
                 key = os.environ.get(env_name, "")
         return key
+
+    def headers(self) -> Dict[str, str]:
+        """Extra HTTP headers for the active provider (static + key header)."""
+        p = self.provider
+        hdrs: Dict[str, str] = dict(p.get("headers") or {})
+        key_header = p.get("key_header")
+        if key_header and self.api_key():
+            hdrs[key_header] = self.api_key()
+        return hdrs
 
     def set_key(self, pid: str, key: str) -> None:
         if key:

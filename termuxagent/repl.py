@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import List, Optional
 
 from . import __version__
-from .config import Config, session_path
+from .config import Config, session_path, storage_home
 from .history import load_history, save_history
 from .llm import LLMError, list_models
 from .theme import THEMES, box, paint, print_banner, rule, set_theme, term_width
 from .tools import READ_ONLY, summarize
-from .ui import Spinner, confirm, error, info, select, success, warn
+from .ui import Spinner, confirm, dim, error, info, select, success, warn
 
 try:  # nicer input: up-arrow history
     import readline  # noqa: F401
@@ -44,11 +44,14 @@ HELP = """{sec}commands{r}
 RUN_BLOCK = re.compile(r"```run\n(.*?)```", re.S)
 
 
+def _input_history_file() -> str:
+    return str(storage_home() / "input-history")
+
+
 def _save_input_history() -> None:
     if _HAS_READLINE:
         try:
-            hist = os.path.join(os.path.expanduser("~"), ".termuxagent",
-                                "input-history")
+            hist = _input_history_file()
             os.makedirs(os.path.dirname(hist), exist_ok=True)
             readline.read_history_file(hist)
         except OSError:
@@ -58,8 +61,8 @@ def _save_input_history() -> None:
 def _flush_input_history() -> None:
     if _HAS_READLINE:
         try:
-            readline.write_history_file(os.path.join(
-                os.path.expanduser("~"), ".termuxagent", "input-history"))
+            readline.set_history_length(500)
+            readline.write_history_file(_input_history_file())
         except OSError:
             pass
 
@@ -121,13 +124,24 @@ class Repl:
                 info(f"resumed {len(old)} messages from last session")
 
         _save_input_history()
+        interrupted_once = False
         try:
             while True:
                 try:
                     line = input(paint("you ❯ ", "secondary", bold=True))
-                except (EOFError, KeyboardInterrupt):
+                except EOFError:
                     print()
                     break
+                except KeyboardInterrupt:
+                    # first Ctrl+C at the prompt just clears the line (phone
+                    # keyboards make it easy to hit by accident)
+                    print()
+                    if interrupted_once:
+                        break
+                    interrupted_once = True
+                    print(paint("  (Ctrl+C again or /exit to quit)", "muted"))
+                    continue
+                interrupted_once = False
                 line = line.strip()
                 if not line:
                     continue
@@ -254,13 +268,7 @@ class Repl:
             self._theme_cmd(arg)
             print(self._status_bar())
         elif cmd == "/provider":
-            from .setup import _pick_provider
-            p = _pick_provider(self.cfg)
-            if p:
-                self.cfg.data["provider"] = p["id"]
-                self.cfg.save()
-                agent.new_session()
-                success(f"provider → {p['name']} · model {self.cfg.model() or '(pick with /model)'}")
+            self._provider_cmd(agent)
         elif cmd == "/model":
             if arg:
                 self.cfg.set_model(self.cfg.provider_id, arg)
@@ -311,6 +319,29 @@ class Repl:
         print()
         return False
 
+    def _provider_cmd(self, agent) -> None:
+        from .setup import _enter_key, _pick_model, _pick_provider
+        from .ui import ask
+        p = _pick_provider(self.cfg)
+        if not p:
+            return
+        self.cfg.data["provider"] = p["id"]
+        if p["id"] == "custom" and not self.cfg.base_url():
+            url = ask("Base URL (e.g. http://192.168.1.5:8080/v1)", "").strip()
+            self.cfg.data["custom_base_urls"]["custom"] = url.rstrip("/")
+        if p.get("needs_key") is not False and not self.cfg.api_key():
+            if not _enter_key(self.cfg, p):
+                warn("no key — chat will fail until you add one (/provider again).")
+        if not self.cfg.model():
+            model = _pick_model(self.cfg, p, test_key=bool(self.cfg.api_key()))
+            if model:
+                self.cfg.set_model(p["id"], model)
+        self.cfg.save()
+        agent.tools_on = self.cfg.tools_enabled()
+        agent.new_session()
+        success(f"provider → {p['name']} · model {self.cfg.model() or '(pick with /model)'}")
+        print(self._status_bar())
+
     def _theme_cmd(self, arg: str) -> None:
         names = list(THEMES)
         if arg and arg in THEMES:
@@ -322,9 +353,10 @@ class Repl:
                 set_theme(names[idx])
                 return banner("AGENT", "", "")[:7] + [paint(f"theme: {names[idx]}", "muted")]
 
-            idx = select("theme", names, index=names.index(self.cfg.data["theme"]),
+            idx = select("theme", names, index=names.index(self.cfg.data["theme"]) if self.cfg.data["theme"] in names else 0,
                          preview=preview)
             if idx is None:
+                set_theme(self.cfg.data["theme"])  # undo the preview
                 return
             chosen = names[idx]
         self.cfg.data["theme"] = chosen
@@ -336,7 +368,7 @@ class Repl:
         with Spinner(f"fetching models from {self.cfg.provider['name']}"):
             try:
                 models = list_models(self.cfg.base_url(), self.cfg.api_key(),
-                                     headers=self.cfg.provider.get("headers"))
+                                     headers=self.cfg.headers())
             except LLMError as exc:
                 models = []
                 warn(str(exc))
@@ -360,7 +392,7 @@ class Repl:
         with Spinner("loading models"):
             try:
                 models = list_models(self.cfg.base_url(), self.cfg.api_key(),
-                                     headers=self.cfg.provider.get("headers"))
+                                     headers=self.cfg.headers())
             except LLMError as exc:
                 error(str(exc))
                 return
@@ -388,8 +420,9 @@ class Repl:
         if self.cfg.data["history"]:
             try:
                 save_history(agent.messages)
-                session_path().write_text(json.dumps(agent.messages), encoding="utf-8")
-            except OSError:
+                session_path().write_text(json.dumps(agent.messages, ensure_ascii=False),
+                                          encoding="utf-8")
+            except (OSError, TypeError):
                 pass
         print()
         print(paint("  bye! 👋  history saved — start with 'agent -c' to continue.",

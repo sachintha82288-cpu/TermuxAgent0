@@ -41,7 +41,7 @@ USAGE = """{p}TermuxAgent v{v}{r} — the AI agent that lives in your terminal
 
 {p}options{r}
   {a}-y, --yes{r}       auto-approve tool actions (one-shot needs this)
-  {a}-c, --continue{r}  resume the last conversation
+  {a}-c, --continue{r}  resume the last conversation  (e.g. {a}agent -c{r})
   {a}-C, --chdir PATH{r}  work in this directory
   {a}-m, --model NAME{r}  override model for this run
   {a}-p, --provider ID{r} override provider for this run
@@ -72,14 +72,29 @@ def main(argv=None) -> int:
         print(f"TermuxAgent v{__version__}")
         return 0
     if cmd not in COMMANDS:
-        # `agent "do something"` → treat as a one-shot ask
-        argv = ["ask"] + argv
-        cmd = "ask"
+        if cmd.startswith("-"):
+            # `agent -c` / `agent -y --no-tools` → flags only → open the chat
+            argv = ["chat"] + argv
+            cmd = "chat"
+        else:
+            # `agent "do something"` → treat as a one-shot ask
+            argv = ["ask"] + argv
+            cmd = "ask"
 
     flags, positional = _parse_flags(argv[1:])
+    if flags["unknown"]:
+        error(f"unknown option: {flags['unknown'][0]}  (see: agent help)")
+        return 2
+    if cmd == "chat" and positional:
+        # `agent -y "do this"` → the text is a one-shot prompt
+        cmd = "ask"
     cfg = Config.load()
-    if flags["provider"] and prov.get(flags["provider"]):
-        cfg.data["provider"] = flags["provider"]
+    if flags["provider"]:
+        if prov.get(flags["provider"]):
+            cfg.data["provider"] = flags["provider"]
+        else:
+            error(f"unknown provider '{flags['provider']}' — see: agent providers")
+            return 1
     if flags["model"]:
         cfg.set_model(cfg.provider_id, flags["model"])
     if flags["no_tools"]:
@@ -142,11 +157,14 @@ def main(argv=None) -> int:
 # ------------------------------------------------------------------ flags
 def _parse_flags(args):
     flags = {"yes": False, "continue": False, "no_tools": False, "chdir": "",
-             "model": "", "provider": ""}
+             "model": "", "provider": "", "unknown": []}
     positional = []
     i = 0
     while i < len(args):
         a = args[i]
+        if a == "--":                      # everything after -- is the prompt
+            positional.extend(args[i + 1:])
+            break
         if a in ("-y", "--yes"):
             flags["yes"] = True
         elif a in ("-c", "--continue"):
@@ -162,6 +180,8 @@ def _parse_flags(args):
         elif a in ("-p", "--provider"):
             i += 1
             flags["provider"] = args[i] if i < len(args) else ""
+        elif a.startswith("--") and len(a) > 2:
+            flags["unknown"].append(a)
         else:
             positional.append(a)
         i += 1
@@ -204,8 +224,9 @@ def _theme_cmd(cfg: Config, positional) -> int:
             return banner("AGENT", "", "")[:7] + [paint(f"theme: {names[idx]}", "muted")]
 
         idx = select("theme (live preview below)", names,
-                     index=names.index(cfg.data["theme"]), preview=preview)
+                     index=names.index(cfg.data["theme"]) if cfg.data["theme"] in names else 0, preview=preview)
         if idx is None:
+            set_theme(cfg.data["theme"])
             return 0
         chosen = names[idx]
     cfg.data["theme"] = chosen
@@ -259,7 +280,7 @@ def _model_cmd(cfg: Config, positional) -> int:
     with Spinner(f"fetching models from {cfg.provider['name']}"):
         try:
             models = list_models(cfg.base_url(), cfg.api_key(),
-                                 headers=cfg.provider.get("headers"))
+                                 headers=cfg.headers())
         except LLMError as exc:
             models = []
             warn(str(exc))
@@ -281,7 +302,7 @@ def _models_cmd(cfg: Config) -> int:
     with Spinner(f"asking {cfg.provider['name']} for its model list"):
         try:
             models = list_models(cfg.base_url(), cfg.api_key(),
-                                 headers=cfg.provider.get("headers"))
+                                 headers=cfg.headers())
         except LLMError as exc:
             error(str(exc))
             warn("check your key/base URL with: agent doctor")
@@ -336,7 +357,7 @@ def _doctor(cfg: Config) -> int:
 
     if cfg.base_url():
         with Spinner(f"pinging {p['name']}"):
-            online = ping(cfg.base_url(), cfg.api_key())
+            online = ping(cfg.base_url(), cfg.api_key(), headers=cfg.headers())
         check("API reachable", online,
               "connected ✓" if online else
               "no response — check internet / key / provider status")
@@ -370,8 +391,10 @@ def _uninstall() -> int:
         return 0
     import shutil as _sh
     _sh.rmtree(home, ignore_errors=True)
-    for d in (os.environ.get("PREFIX", "/data/data/com.termux/files/usr"),
-              os.path.expanduser("~/.local/bin"), "/usr/local/bin"):
+    _sh.rmtree(Path.home() / ".termuxagent", ignore_errors=True)  # legacy dir
+    prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    for d in (os.path.join(prefix, "bin"), os.path.expanduser("~/.local/bin"),
+              os.path.expanduser("~/bin"), "/usr/local/bin"):
         for name in ("agent", "Agent"):
             try:
                 os.remove(os.path.join(d, name))

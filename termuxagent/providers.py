@@ -42,6 +42,7 @@ PROVIDERS: List[Dict] = [
         "models": ["claude-sonnet-4-20250514", "claude-3-7-sonnet-20250219",
                    "claude-3-5-haiku-20241022"],
         "tools": True, "headers": {"anthropic-version": "2023-06-01"},
+        "key_header": "x-api-key",
     },
     {
         "id": "gemini", "name": "Google Gemini", "group": "cloud",

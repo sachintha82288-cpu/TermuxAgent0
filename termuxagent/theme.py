@@ -156,6 +156,13 @@ def term_width() -> int:
         return 58
 
 
+def term_height() -> int:
+    try:
+        return shutil.get_terminal_size(fallback=(58, 24)).lines
+    except Exception:  # pragma: no cover
+        return 24
+
+
 def visible_len(text: str) -> int:
     """Length of *text* ignoring ANSI escapes."""
     import re
