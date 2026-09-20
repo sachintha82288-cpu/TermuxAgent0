@@ -41,7 +41,7 @@ HELP = """{sec}commands{r}
 {sec}shortcuts{r}
   {acc}!command{r}       run a shell command directly, e.g. {mut}!ls -la{r}
   {acc}Ctrl+C{r}         stop the current answer · twice = exit
-  {mut}අනිත් ඔක්කොම AI එකට යනවා. සිංහලෙන් හෝ English වලින් අහන්න.{r}"""
+  {mut}Everything else goes to the AI. Ask in any language.{r}"""
 
 RUN_BLOCK = re.compile(r"```run\n(.*?)```", re.S)
 
@@ -114,11 +114,11 @@ class Repl:
         if self._is_first_chat():
             print()
             print(box([
-                paint("උදාහරණ — ඕනම එකක් type කරලා බලන්න:", "secondary", bold=True),
-                "  • battery එක කීයද කියලා බලන්න",
-                "  • මේ folder එකේ python project එකක් හදන්න",
-                "  • pkg update කරලා git install කරන්න",
-                "  • ~/storage/downloads එකේ ලොකුම files 5 පෙන්නන්න",
+                paint("Try one of these — just type it:", "secondary", bold=True),
+                "  • what's my battery level?",
+                "  • create a python project in this folder",
+                "  • update packages and install git",
+                "  • show the 5 largest files in ~/storage/downloads",
                 "",
                 paint("/help = commands · !cmd = shell · Ctrl+C ×2 = exit", "muted"),
             ], title="tips", color="accent"))
@@ -228,18 +228,16 @@ class Repl:
     def _hint_for_error(self, msg: str) -> None:
         low = msg.lower()
         if "401" in low or "invalid api key" in low:
-            warn("key එක වැරදියි වගේ → /provider එකෙන් නැවත paste කරන්න, "
-                 "නැත්නම් 'agent setup'.")
+            warn("Looks like a bad API key → re-enter it via /provider or 'agent setup'.")
         elif "429" in low or "rate limit" in low:
-            warn("rate limit → පොඩ්ඩක් ඉඳලා නැවත try කරන්න, "
-                 "නැත්නම් /model එකෙන් වෙනත් model එකක්.")
+            warn("Rate limited → wait a moment and retry, or pick another model with /model.")
         elif "404" in low or "422" in low:
-            warn("model නම වැරදියි වගේ → /models බලලා /model එකෙන් තෝරන්න.")
+            warn("The model name looks wrong → check /models and pick one with /model.")
         elif "cannot reach" in low or "timed out" in low or "connection" in low:
             if self.cfg.provider.get("needs_key") is False:
-                warn("local server එක run වෙනවද? (ollama serve / LM Studio server)")
+                warn("Is the local server running? (ollama serve / LM Studio server)")
             else:
-                warn("internet එක බලන්න · 'agent doctor' එකෙන් check කරන්න.")
+                warn("Check your internet connection · run 'agent doctor' to diagnose.")
         else:
             warn("try /provider to switch APIs, or 'agent doctor' to diagnose.")
 
