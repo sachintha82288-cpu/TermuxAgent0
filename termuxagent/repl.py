@@ -12,7 +12,8 @@ from . import __version__
 from .config import Config, session_path, storage_home
 from .history import load_history, save_history
 from .llm import LLMError, list_models
-from .theme import THEMES, box, paint, print_banner, rule, set_theme, term_width
+from .theme import (THEMES, box, gradient_text, paint, print_banner, rule,
+                    set_theme, term_width)
 from .tools import READ_ONLY, summarize
 from .ui import Spinner, confirm, dim, error, info, select, success, warn
 
@@ -39,7 +40,8 @@ HELP = """{sec}commands{r}
 
 {sec}shortcuts{r}
   {acc}!command{r}       run a shell command directly, e.g. {mut}!ls -la{r}
-  {mut}Everything else goes to the AI. Ask in Sinhala or English.{r}"""
+  {acc}Ctrl+C{r}         stop the current answer · twice = exit
+  {mut}අනිත් ඔක්කොම AI එකට යනවා. සිංහලෙන් හෝ English වලින් අහන්න.{r}"""
 
 RUN_BLOCK = re.compile(r"```run\n(.*?)```", re.S)
 
@@ -109,7 +111,19 @@ class Repl:
         print_banner(f"v{__version__} · your terminal's AI")
         print()
         print(self._status_bar())
-        print(paint("  /help for commands · type anything to start", "muted"))
+        if self._is_first_chat():
+            print()
+            print(box([
+                paint("උදාහරණ — ඕනම එකක් type කරලා බලන්න:", "secondary", bold=True),
+                "  • battery එක කීයද කියලා බලන්න",
+                "  • මේ folder එකේ python project එකක් හදන්න",
+                "  • pkg update කරලා git install කරන්න",
+                "  • ~/storage/downloads එකේ ලොකුම files 5 පෙන්නන්න",
+                "",
+                paint("/help = commands · !cmd = shell · Ctrl+C ×2 = exit", "muted"),
+            ], title="tips", color="accent"))
+        else:
+            print(paint("  /help for commands · type anything to start", "muted"))
         print()
 
         agent = Agent(self.cfg, on_content=self._print_stream,
@@ -157,6 +171,17 @@ class Repl:
             _flush_input_history()
             self._goodbye(agent)
 
+    def _is_first_chat(self) -> bool:
+        flag = storage_home() / ".welcomed"
+        if flag.exists():
+            return False
+        try:
+            flag.parent.mkdir(parents=True, exist_ok=True)
+            flag.write_text("1")
+        except OSError:
+            pass
+        return True
+
     # ------------------------------------------------------------------ send
     def _send(self, agent, text: str) -> None:
         spinner = Spinner("thinking")
@@ -183,7 +208,7 @@ class Repl:
             if self._content_started:
                 print()
             error(str(exc))
-            warn("try /provider to switch APIs, or 'agent doctor' to diagnose.")
+            self._hint_for_error(str(exc))
             return
         except KeyboardInterrupt:
             spinner.stop()
@@ -199,6 +224,24 @@ class Repl:
         self._offer_run_blocks(reply or "")
         print(rule(color="muted"))
         print()
+
+    def _hint_for_error(self, msg: str) -> None:
+        low = msg.lower()
+        if "401" in low or "invalid api key" in low:
+            warn("key එක වැරදියි වගේ → /provider එකෙන් නැවත paste කරන්න, "
+                 "නැත්නම් 'agent setup'.")
+        elif "429" in low or "rate limit" in low:
+            warn("rate limit → පොඩ්ඩක් ඉඳලා නැවත try කරන්න, "
+                 "නැත්නම් /model එකෙන් වෙනත් model එකක්.")
+        elif "404" in low or "422" in low:
+            warn("model නම වැරදියි වගේ → /models බලලා /model එකෙන් තෝරන්න.")
+        elif "cannot reach" in low or "timed out" in low or "connection" in low:
+            if self.cfg.provider.get("needs_key") is False:
+                warn("local server එක run වෙනවද? (ollama serve / LM Studio server)")
+            else:
+                warn("internet එක බලන්න · 'agent doctor' එකෙන් check කරන්න.")
+        else:
+            warn("try /provider to switch APIs, or 'agent doctor' to diagnose.")
 
     def _offer_run_blocks(self, reply: str) -> None:
         """Providers without function calling: offer to run ```run blocks."""
@@ -237,13 +280,14 @@ class Repl:
             else paint("tools off", "warn")
         auto = paint("auto-approve", "warn") if self.auto else paint("ask-first", "ok")
         bar = (paint("┌─ ", "primary") +
-               paint(p["name"], "primary", bold=True) +
+               "\033[1m" + gradient_text(p["name"]) + "\033[0m" +
                paint(" ─┄ ", "muted") + paint(self.cfg.model() or "?", "secondary") +
                paint(" ─┄ ", "muted") + tools +
                paint(" ─┄ ", "muted") + auto +
                paint(" ─┄ ", "muted") + paint(self.cfg.data["theme"], "accent") +
                paint(" ─", "primary"))
-        return bar[: max(term_width(), 20)]
+        from .theme import truncate
+        return truncate(bar, max(term_width(), 20))
 
     def _command(self, line: str, agent) -> bool:
         """Handle a /command.  Returns True when the REPL should exit."""

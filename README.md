@@ -22,8 +22,8 @@ task is done. Ask in **Sinhala or English**.
 
 - ⚡ **27 API providers built in** — Groq, OpenAI, Gemini, Claude, Grok,
   DeepSeek, OpenRouter, Mistral, Cerebras, Ollama (local)… full list below
-- 🎨 **12 තේමා 12 themes** — neon, cyberpunk, matrix, dracula… සුපිරි banner +
-  gradients + arrow-key menus
+- 🎨 **13 themes** — default **aurora** (24-bit violet→cyan→mint gradient),
+  neon, cyberpunk, matrix, dracula… banner + gradients + arrow-key menus
 - 🛠 **Real tools** — `shell`, `read_file`, `write_file`, `edit_file`, `list_dir`
   with safety checks and approve-before-run
 - 📦 **100% Python stdlib** — `pip install` අවශ්‍ය නෑ, python3 ප්‍රමාණවතයි
@@ -50,11 +50,16 @@ curl -fsSL https://raw.githubusercontent.com/sachintha82288-cpu/TermuxAgent0/mai
 Install වුණාම **Termux එකේ `Agent` type කරන්න** — agent එක open වෙනවා
 (`agent` වලිනුත් පුළුවන්). First run එකේදීම setup wizard එක එයි:
 
-1. **Provider එක තෝරන්න** — `Groq` recommend කරනවා (නොමිලේ, ගොඩක් වේගවත්)
-2. **API key එක paste කරන්න** — [console.groq.com/keys](https://console.groq.com/keys)
-   එකෙන් නොමිලේ ගන්න පුළුවන්
+1. **Provider එක තෝරන්න** — quick-start menu එකේ `Groq` (නොමිලේ, වේගවත්),
+   Gemini, OpenRouter, Ollama උඩින්ම; ඕන නම් 27ම බලන්න පුළුවන්
+2. **API key එක paste කරන්න** — link එක පෙන්නනවා, browser එකෙන් open කරලා
+   දෙනවා ([console.groq.com/keys](https://console.groq.com/keys)); paste කළ
+   ගමන්ම key එක test වෙනවා
 3. **Model එක තෝරන්න** — list එක automatically එනවා
 4. **Theme එක තෝරන්න** — live preview එකක් එක්කම
+
+> **බාහිර packages කිසිවක් නෑ** — `pip install` නෑ, `npm` නෑ. Termux එකේ
+> `python` package එක විතරයි (installer එකම දාගන්නවා).
 
 Done! `Agent` type කරලා chat කරන්න. 🎉
 
@@ -129,8 +134,11 @@ bash install.sh        # installs ~/.local/bin/agent + Agent
 
 ## 🎨 Themes
 
-`neon` (default) · `cyberpunk` · `matrix` · `dracula` · `nord` · `sunset` ·
-`ocean` · `sakura` · `ruby` · `gold` · `vaporwave` · `mono`
+`aurora` (default, 24-bit gradient) · `neon` · `cyberpunk` · `matrix` ·
+`dracula` · `nord` · `sunset` · `ocean` · `sakura` · `ruby` · `gold` ·
+`vaporwave` · `mono`
+
+Truecolor auto-detect වෙනවා (Termux ✓); අවශ්‍ය නම් `TERMUXAGENT_TRUECOLOR=0`.
 
 ```bash
 Agent theme matrix     # හෝ chat එක ඇතුළේ /theme
@@ -140,7 +148,7 @@ Agent theme matrix     # හෝ chat එක ඇතුළේ /theme
 
 ```
 termuxagent/
-  theme.py       12 themes · gradients · block-letter banners · boxes
+  theme.py       13 themes · gradients · block-letter banners · boxes
   providers.py   27-provider catalogue (URLs, key links, defaults)
   ui.py          arrow-key menus · spinner · styled prompts
   setup.py       first-run wizard (provider → key → model → theme)

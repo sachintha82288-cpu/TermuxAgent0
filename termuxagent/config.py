@@ -18,7 +18,7 @@ DEFAULTS: Dict = {
     "api_keys": {},            # provider id -> key
     "models": {},              # provider id -> model id
     "custom_base_urls": {},    # provider id -> url (for "custom")
-    "theme": "neon",
+    "theme": "aurora",
     "tools": True,
     "auto_approve": False,
     "temperature": 0.6,

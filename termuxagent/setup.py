@@ -42,14 +42,38 @@ def _pick_provider(cfg: Config) -> Optional[dict]:
     return meta[idx]
 
 
+def _can_open_url() -> bool:
+    import shutil
+    return bool(shutil.which("termux-open-url") or shutil.which("xdg-open")
+                or shutil.which("open"))
+
+
+def _open_url(url: str) -> None:
+    import shutil
+    import subprocess
+    for cmd in ("termux-open-url", "xdg-open", "open"):
+        if shutil.which(cmd):
+            try:
+                subprocess.Popen([cmd, url], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
+            return
+
+
 def _enter_key(cfg: Config, p: dict) -> bool:
     if p.get("needs_key") is False:
         info(f"{p['name']} runs locally — no API key needed.")
         return True
     print()
+    url = p.get("key_url") or ""
     print(box(
-        [paint(f"Create a key at: {p.get('key_url') or '(see provider docs)'}", "accent")],
+        [paint(f"Key එකක් හදාගන්න: {url or '(see provider docs)'}", "accent"),
+         paint("(key එක type කරද්දී තිරයේ පේන්නේ නෑ — paste කරලා Enter)", "muted")],
         title=p["name"] + " API key"))
+    if url and _can_open_url():
+        if confirm("Browser එකෙන් ඒ page එක open කරන්නද?", default=False):
+            _open_url(url)
     attempts = 0
     while attempts < 3:
         attempts += 1
@@ -68,6 +92,21 @@ def _enter_key(cfg: Config, p: dict) -> bool:
             warn("that doesn't look like an API key — please paste it again.")
             continue
         cfg.set_key(p["id"], key)
+        if cfg.base_url():
+            from .ui import Spinner
+            with Spinner(f"key එක check කරනවා → {p['name']}"):
+                try:
+                    list_models(cfg.base_url(), key, headers=cfg.headers())
+                    ok = True
+                except LLMError as exc:
+                    ok, err = False, str(exc)
+            if ok:
+                success(f"Key එක වැඩ! ✓  ({cfg.masked_key()})")
+                return True
+            warn(f"key එක වැඩ කළේ නෑ: {err.splitlines()[0]}")
+            if not confirm("නැවත paste කරන්නද? (No = මේ key එකම තියාගන්න)", default=True):
+                return True
+            continue
         success(f"key received: {cfg.masked_key()}")
         return True
     return False
@@ -119,10 +158,26 @@ def _pick_theme(cfg: Config) -> str:
 
     names = list(THEMES)
     idx = select("Pick a theme (see live preview below)", names,
-                 index=names.index(cfg.data.get("theme", "neon")) if cfg.data.get("theme") in names else 0, preview=preview)
-    chosen = names[idx] if idx is not None else cfg.data.get("theme", "neon")
+                 index=names.index(cfg.data.get("theme", "aurora")) if cfg.data.get("theme") in names else 0, preview=preview)
+    chosen = names[idx] if idx is not None else cfg.data.get("theme", "aurora")
     set_theme(chosen)
     return chosen
+
+
+def _quick_start_menu(cfg: Config) -> Optional[dict]:
+    """First-run shortcut: recommended free providers up top, full list below."""
+    quick = [("groq", "⚡ Groq — නොමිලේ · ඉතාම වේගවත් · recommended"),
+             ("gemini", "✨ Google Gemini — නොමිලේ (AI Studio key)"),
+             ("openrouter", "🌐 OpenRouter — එක key එකකින් models සිය ගණනක්"),
+             ("ollama", "🖥 Ollama — phone/PC එකේම, key ඕන නෑ")]
+    labels = [lbl for _, lbl in quick] + [paint("… සියලු providers 27 බලන්න", "muted")]
+    idx = select("Provider එකක් තෝරන්න  (↑↓ · Enter)", labels, index=0,
+                 allow_cancel=False)
+    if idx is None:
+        return None
+    if idx == len(labels) - 1:
+        return _pick_provider(cfg)
+    return prov.get(quick[idx][0])
 
 
 def run_setup(cfg: Config, first_run: bool = False) -> Config:
@@ -131,11 +186,18 @@ def run_setup(cfg: Config, first_run: bool = False) -> Config:
     if first_run:
         print_banner(f"setup · v{__version__}")
         print()
-        print(paint("Let's connect your agent to an AI. "
-                    "Pick a provider — Groq has a fast free tier.", "muted"))
+        print(box([
+            paint("ආයුබෝවන්! 👋  විනාඩියකින් ready.", "primary", bold=True),
+            "",
+            "1. AI provider එකක් තෝරන්න   (Groq = නොමිලේ + වේගවත්)",
+            "2. API key එක paste කරන්න    (link එක පෙන්නනවා)",
+            "3. Model + theme තෝරන්න",
+            "",
+            paint("pip / npm කිසිවක් install වෙන්නේ නෑ — python විතරයි.", "muted"),
+        ], title="setup", color="accent"))
         print()
 
-    p = _pick_provider(cfg)
+    p = _quick_start_menu(cfg) if first_run else _pick_provider(cfg)
     if p is None:
         warn("Setup cancelled — nothing saved.")
         return cfg
@@ -175,9 +237,10 @@ def run_setup(cfg: Config, first_run: bool = False) -> Config:
         f"theme:    {cfg.data['theme']}",
         f"config:   {path}",
     ], title="saved", color="ok"))
-    success("TermuxAgent is ready.")
+    success("TermuxAgent ready! 🎉")
+    print(paint("  ඕනම වෙලාවක:  agent  ·  agent setup  ·  agent doctor", "muted"))
     print()
-    if confirm("Start chatting now?", default=first_run):
+    if confirm("දැන්ම chat කරන්නද?", default=first_run):
         from .repl import run_repl
         run_repl(cfg)
     return cfg

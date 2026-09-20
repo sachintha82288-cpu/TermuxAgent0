@@ -164,7 +164,7 @@ def select(title: str, options: List[str], index: int = 0,
         for i in range(top, min(len(options), top + visible)):
             opt = options[i]
             mark = paint("❯ ", "accent", bold=True) if i == cur else "  "
-            name = theme.truncate(opt, width - 6)
+            name = theme.truncate(opt, max(8, width - 6))
             if i == cur:
                 lines.append(mark + paint(name, "primary", bold=True))
             else:

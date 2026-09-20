@@ -49,7 +49,7 @@ class ConfigTest(unittest.TestCase):
     def test_defaults(self):
         cfg = Config()
         self.assertEqual(cfg.data["provider"], "groq")
-        self.assertEqual(cfg.data["theme"], "neon")
+        self.assertEqual(cfg.data["theme"], "aurora")
         self.assertTrue(cfg.data["tools"])
 
     def test_provider_accessors(self):
@@ -268,7 +268,7 @@ class RegressionTest(unittest.TestCase):
         Path(tmp.name, "config.json").write_text(json.dumps(
             {"theme": "nope", "timeout": "x", "api_keys": None}))
         cfg = Config.load()
-        self.assertEqual(cfg.data["theme"], "neon")
+        self.assertEqual(cfg.data["theme"], "aurora")
         self.assertEqual(cfg.data["timeout"], 90)
         self.assertEqual(cfg.data["api_keys"], {})
 

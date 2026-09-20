@@ -134,7 +134,7 @@ def main(argv=None) -> int:
 
     # chat / ask — need a working configuration
     if not cfg.is_configured():
-        info("first run — let's set up your AI provider (takes ~30 seconds).")
+        info("පළවෙනි වතාව — AI provider එක connect කරමු (තත්පර 30යි).")
         print()
         from .setup import run_setup
         try:
@@ -375,10 +375,21 @@ def _doctor(cfg: Config) -> int:
     fails = sum(1 for ok, _ in results if not ok)
     print()
     if fails == 0:
-        success("all good — you're ready to chat. run: agent")
+        success("ඔක්කොම හරි ✓ — chat කරන්න:  agent")
+        return 0
+    warn(f"ප්‍රශ්න {fails}ක් හමුවුණා.")
+    needs_setup = not cfg.api_key() and p.get("needs_key") is not False \
+        and p["id"] != "custom"
+    if needs_setup or not cfg.model():
+        if confirm("දැන්ම setup wizard එකෙන් හදමුද?", default=True):
+            from .setup import run_setup
+            try:
+                run_setup(cfg, first_run=False)
+            except (KeyboardInterrupt, EOFError):
+                print()
     else:
-        warn(f"{fails} issue(s) found — fix the ✗ lines above (agent setup helps).")
-    return 0 if fails == 0 else 1
+        dim("hint: agent setup  ·  agent provider <id>  ·  agent models")
+    return 1
 
 
 def _uninstall() -> int:
