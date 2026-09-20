@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "termuxagent"
-version = "1.0.0"
+version = "1.0.1"
 description = "A real AI agent that lives in your Termux terminal — 27 API providers, themed TUI, shell + file tools, pure stdlib"
 readme = "README.md"
 requires-python = ">=3.8"

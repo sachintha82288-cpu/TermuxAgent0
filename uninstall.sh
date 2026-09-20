@@ -6,14 +6,15 @@ say() { printf "${GREEN}[+]${RESET} %s\n" "$1"; }
 ask() { printf "${CYAN}[?]${RESET} %s" "$1"; }
 warn() { printf "${YELLOW}[!]${RESET} %s\n" "$1"; }
 
+if [ -t 0 ]; then IN=/dev/stdin; else IN=/dev/tty; fi
 ask "remove ~/.termux-agent and the agent/Agent commands? [y/N] "
-read -r REPLY
+read -r REPLY <"$IN" || REPLY=""
 if [ "$REPLY" != "y" ] && [ "$REPLY" != "Y" ]; then
     say "cancelled."
     exit 0
 fi
 
-rm -rf "$HOME/.termux-agent"
+rm -rf "$HOME/.termux-agent" "$HOME/.termuxagent"
 for BIN_DIR in "${PREFIX:-/data/data/com.termux/files/usr}/bin" "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
     [ -d "$BIN_DIR" ] || continue
     rm -f "$BIN_DIR/agent" "$BIN_DIR/Agent" 2>/dev/null || true

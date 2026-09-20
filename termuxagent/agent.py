@@ -120,22 +120,58 @@ class Agent:
             timeout=self.cfg.data["timeout"],
             stream=self.cfg.data["stream"],
             temperature=self.cfg.data["temperature"],
-            extra_headers=self.cfg.provider.get("headers"),
+            extra_headers=self.cfg.headers(),
             on_content=self.on_content,
             on_reasoning=self.on_reasoning if self.cfg.data["show_reasoning"] else None,
         )
 
     def chat(self, user_text: str) -> str:
         """One user turn → run the tool loop → final assistant text."""
+        mark = len(self.messages)
         self.messages.append({"role": "user", "content": user_text})
         try:
             return self._loop()
         except LLMError:
-            self.messages.pop()  # keep the conversation usable
+            # drop the whole failed turn (user msg + any partial tool steps)
+            # so the next request is not rejected for a dangling tool_call
+            del self.messages[mark:]
+            raise
+        except KeyboardInterrupt:
+            self._repair_after_interrupt(mark)
             raise
 
+    def _repair_after_interrupt(self, mark: int) -> None:
+        """Ctrl+C mid-turn: keep what happened but leave a valid transcript.
+
+        An assistant message with tool_calls must be followed by one tool
+        result per call, otherwise every provider rejects the next request.
+        """
+        if len(self.messages) <= mark + 1:
+            return
+        last = self.messages[-1]
+        if last.get("role") == "assistant" and last.get("tool_calls"):
+            for call in last["tool_calls"]:
+                self.messages.append({"role": "tool",
+                                      "tool_call_id": call.get("id", ""),
+                                      "name": call.get("function", {}).get("name", ""),
+                                      "content": "[interrupted by user]"})
+        elif last.get("role") == "tool":
+            # fill in results for any calls of the preceding assistant msg
+            for i in range(len(self.messages) - 1, mark, -1):
+                m = self.messages[i]
+                if m.get("role") == "assistant" and m.get("tool_calls"):
+                    done = {t.get("tool_call_id") for t in self.messages[i + 1:]}
+                    for call in m["tool_calls"]:
+                        if call.get("id", "") not in done:
+                            self.messages.append({
+                                "role": "tool", "tool_call_id": call.get("id", ""),
+                                "name": call.get("function", {}).get("name", ""),
+                                "content": "[interrupted by user]"})
+                    break
+
     def _loop(self) -> str:
-        for _ in range(MAX_ITERATIONS):
+        max_steps = int(self.cfg.data.get("max_steps") or MAX_ITERATIONS)
+        for _ in range(max_steps):
             response = self._call_llm()
             self._track_usage()
             if response.get("content") is None:
@@ -150,7 +186,7 @@ class Agent:
             for call in tool_calls:
                 self._run_one_tool(call)
         return ("[stopped] the agent hit the maximum number of tool steps "
-                f"({MAX_ITERATIONS}) for one request.")
+                f"({max_steps}) for one request — say 'continue' to keep going.")
 
     def _run_one_tool(self, call: dict) -> None:
         fn = call.get("function", {})

@@ -6,5 +6,5 @@ API providers (Groq, OpenAI, Gemini, OpenRouter, …) or local servers
 (Ollama, LM Studio, llama.cpp).
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 APP_NAME = "TermuxAgent"

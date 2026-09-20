@@ -7,7 +7,9 @@ extra per-provider headers and ``GET {base_url}/models``.
 """
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import urllib.error
 import urllib.request
 from typing import Callable, Dict, List, Optional
@@ -93,18 +95,32 @@ def _post(url: str, payload: dict, api_key: str, timeout: int,
         body = exc.read().decode("utf-8", errors="replace")[:400]
         raise LLMError(_friendly_error(url, exc.code, body)) from exc
     except urllib.error.URLError as exc:
+        if isinstance(exc.reason, socket.timeout):
+            raise LLMError(f"timed out after {timeout}s contacting the API") from exc
         raise LLMError(f"cannot reach {url}\n  ({exc.reason}) — "
                        f"check your internet connection") from exc
-    except TimeoutError as exc:
+    except (socket.timeout, TimeoutError) as exc:
         raise LLMError(f"timed out after {timeout}s contacting the API") from exc
+    except (http.client.HTTPException, OSError) as exc:
+        raise LLMError(f"connection error talking to {url}: {exc}") from exc
 
 
-def _iter_sse(resp) -> str:
-    for raw in resp:
-        line = raw.decode("utf-8", errors="replace").strip()
-        if not line or not line.startswith("data:"):
-            continue
-        yield line[len("data:"):].strip()
+def _iter_sse(resp):
+    try:
+        for raw in resp:
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            yield line[len("data:"):].strip()
+    except (socket.timeout, TimeoutError) as exc:
+        raise LLMError("the stream stalled (read timeout) — the provider stopped "
+                       "sending; try again") from exc
+    except (http.client.IncompleteRead, http.client.HTTPException,
+            ConnectionError, OSError) as exc:
+        raise LLMError(f"stream interrupted: {exc}") from exc
+
+
+_RETRY_PLAIN_MARKERS = ("http 400", "http 415", "http 422", "http 501", "stream")
 
 
 def chat(*, base_url: str, api_key: str, model: str, messages: List[dict],
@@ -132,7 +148,8 @@ def chat(*, base_url: str, api_key: str, model: str, messages: List[dict],
     try:
         resp = _post(url, build(stream), api_key, timeout, extra_headers)
     except LLMError as exc:
-        if stream and "timed out" not in str(exc).lower():
+        low = str(exc).lower()
+        if stream and any(m in low for m in _RETRY_PLAIN_MARKERS):
             stream = False  # some providers reject SSE — retry plain
             resp = _post(url, build(False), api_key, timeout, extra_headers)
         else:
@@ -145,8 +162,14 @@ def chat(*, base_url: str, api_key: str, model: str, messages: List[dict],
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 raise LLMError(f"invalid JSON from {url}: {exc}") from exc
             if "error" in data:
-                raise LLMError(str(data["error"])[:300])
-            return data["choices"][0]["message"]
+                err = data["error"]
+                raise LLMError(str(err.get("message", err) if isinstance(err, dict)
+                                   else err)[:300])
+            try:
+                return data["choices"][0]["message"]
+            except (KeyError, IndexError, TypeError) as exc:
+                raise LLMError(f"unexpected response shape from {url}: "
+                               f"{str(data)[:200]}") from exc
 
         acc = StreamedReply()
         for data_str in _iter_sse(resp):
@@ -156,6 +179,10 @@ def chat(*, base_url: str, api_key: str, model: str, messages: List[dict],
                 chunk = json.loads(data_str)
             except json.JSONDecodeError:
                 continue
+            if isinstance(chunk, dict) and chunk.get("error"):
+                err = chunk["error"]
+                raise LLMError(str(err.get("message", err) if isinstance(err, dict)
+                                   else err)[:300])
             choices = chunk.get("choices") or []
             if chunk.get("usage"):
                 acc.usage = chunk["usage"]
@@ -198,15 +225,20 @@ def list_models(base_url: str, api_key: str,
                        exc.read().decode("utf-8", errors="replace")[:300])) from exc
     except urllib.error.URLError as exc:
         raise LLMError(f"cannot reach {url} ({exc.reason})") from exc
+    except (socket.timeout, TimeoutError, http.client.HTTPException, OSError,
+            json.JSONDecodeError) as exc:
+        raise LLMError(f"could not read model list from {url}: {exc}") from exc
+    if not isinstance(data, dict):
+        return []
     items = data.get("data") or data.get("models") or []
     ids = sorted({(m.get("id") or m.get("name") or "").strip()
                   for m in items if isinstance(m, dict)})
     return [i for i in ids if i]
 
 
-def ping(base_url: str, api_key: str) -> bool:
+def ping(base_url: str, api_key: str, headers: Optional[dict] = None) -> bool:
     try:
-        list_models(base_url, api_key)
+        list_models(base_url, api_key, headers=headers)
         return True
     except LLMError:
         return False

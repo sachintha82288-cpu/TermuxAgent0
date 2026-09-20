@@ -49,7 +49,7 @@ class ConfigTest(unittest.TestCase):
     def test_defaults(self):
         cfg = Config()
         self.assertEqual(cfg.data["provider"], "groq")
-        self.assertEqual(cfg.data["theme"], "neon")
+        self.assertEqual(cfg.data["theme"], "aurora")
         self.assertTrue(cfg.data["tools"])
 
     def test_provider_accessors(self):
@@ -239,3 +239,60 @@ class AgentLoopTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RegressionTest(unittest.TestCase):
+    """Bugs users hit in 1.0.0 that must stay fixed."""
+
+    def test_danger_check_is_not_a_substring_match(self):
+        for cmd in ('git commit -m "fix reboot bug"', "grep shutdown log.txt",
+                    "echo halted", "cat x > /dev/null"):
+            self.assertIsNone(is_dangerous(cmd), cmd)
+        for cmd in ("ls; reboot", "sudo rm -rf / --no-preserve-root",
+                    "echo hi > /dev/sda", "rm -rf ~"):
+            self.assertIsNotNone(is_dangerous(cmd), cmd)
+
+    def test_flags_before_command_open_chat(self):
+        from termuxagent.cli import _parse_flags
+        flags, pos = _parse_flags(["-y", "-c", "--", "-x", "hello"])
+        self.assertTrue(flags["yes"] and flags["continue"])
+        self.assertEqual(pos, ["-x", "hello"])
+        flags, _ = _parse_flags(["--bogus"])
+        self.assertEqual(flags["unknown"], ["--bogus"])
+
+    def test_config_repairs_bad_values(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        os.environ["TERMUXAGENT_HOME"] = tmp.name
+        self.addCleanup(os.environ.pop, "TERMUXAGENT_HOME", None)
+        Path(tmp.name, "config.json").write_text(json.dumps(
+            {"theme": "nope", "timeout": "x", "api_keys": None}))
+        cfg = Config.load()
+        self.assertEqual(cfg.data["theme"], "aurora")
+        self.assertEqual(cfg.data["timeout"], 90)
+        self.assertEqual(cfg.data["api_keys"], {})
+
+    def test_storage_home_matches_installer(self):
+        os.environ.pop("TERMUXAGENT_HOME", None)
+        from termuxagent.config import storage_home
+        self.assertEqual(storage_home().name, ".termux-agent")
+
+    def test_anthropic_sends_x_api_key(self):
+        cfg = Config({"provider": "anthropic",
+                      "api_keys": {"anthropic": "sk-ant-1234567890"}})
+        self.assertEqual(cfg.headers().get("x-api-key"), "sk-ant-1234567890")
+        self.assertIn("anthropic-version", cfg.headers())
+
+    def test_interrupt_leaves_valid_transcript(self):
+        from termuxagent.agent import Agent
+        cfg = Config({"provider": "ollama"})
+        agent = Agent(cfg, workdir=Path("."))
+        agent.new_session()
+        mark = len(agent.messages)
+        agent.messages.append({"role": "user", "content": "do it"})
+        agent.messages.append({"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "shell", "arguments": "{}"}}]})
+        agent._repair_after_interrupt(mark)
+        self.assertEqual(agent.messages[-1]["role"], "tool")
+        self.assertEqual(agent.messages[-1]["tool_call_id"], "c1")

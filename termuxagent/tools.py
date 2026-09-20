@@ -17,12 +17,28 @@ from typing import Dict, List, Optional
 MAX_OUTPUT_CHARS = 12_000
 MAX_READ_CHARS = 40_000
 
-# substring patterns (lower-cased) that are refused outright
-DANGEROUS = [
-    "rm -rf /", "rm -rf /*", "rm -fr /", "mkfs", ":(){:|:&};:",
-    "dd if=", "of=/dev/", "> /dev/sd", "chmod -r 777 /",
-    "shutdown", "reboot", "halt", "poweroff", "init 0", "init 6",
+# regexes (matched against the lower-cased, whitespace-normalised command)
+# that are refused outright.  They are anchored to *command position* so that
+# e.g. ``git commit -m "fix reboot bug"`` or ``grep shutdown log.txt`` pass.
+_CMD_START = r"(?:^|[;&|(`]\s*|\$\(\s*|\bsudo\s+|\bexec\s+)"
+DANGEROUS_PATTERNS = [
+    (r"rm\s+(-\w*[rf]\w*\s+)+(/|/\*|~|\$home|\$prefix|/data)(\s|$)", "rm -rf /"),
+    (r"mkfs(\.\w+)?\b", "mkfs"),
+    (r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", "fork bomb"),
+    (r"dd\s+.*of=/dev/", "dd to a device"),
+    (r"chmod\s+(-\w*r\w*\s+)?[0-7]{3,4}\s+/(\s|$)", "chmod -R on /"),
+    (r"chown\s+(-\w*r\w*\s+).*\s/(\s|$)", "chown -R on /"),
+    (r"(shutdown|reboot|halt|poweroff)\b", "shutdown/reboot"),
+    (r"init\s+[06]\b", "init 0/6"),
+    (r"(termux-)?wipe(-data)?\b", "wipe"),
 ]
+# patterns that are dangerous anywhere in the line (redirections)
+_ANYWHERE_PATTERNS = [
+    (r">\s*/dev/(sd[a-z]|mmcblk\d|block/|nvme\d)", "write to block device"),
+]
+DANGEROUS = ([re.compile(_CMD_START + pat) for pat, _ in DANGEROUS_PATTERNS] +
+             [re.compile(pat) for pat, _ in _ANYWHERE_PATTERNS])
+_DANGER_LABELS = [lbl for _, lbl in DANGEROUS_PATTERNS + _ANYWHERE_PATTERNS]
 
 
 class ToolError(Exception):
@@ -142,12 +158,27 @@ def summarize(name: str, args: Dict) -> str:
 
 
 def is_dangerous(command: str) -> Optional[str]:
-    low = command.lower().replace("\n", " ")
-    low = re.sub(r"\s+", " ", low)
-    for pattern in DANGEROUS:
-        if pattern in low:
-            return pattern
+    """Return a short label when *command* matches the blocklist, else None."""
+    low = command.lower().replace("\n", " ; ")
+    low = re.sub(r"\s+", " ", low).strip()
+    for rx, label in zip(DANGEROUS, _DANGER_LABELS):
+        if rx.search(low):
+            return label
     return None
+
+
+def _shell_executable() -> str:
+    """A POSIX shell that understands ``-c``: the user's shell if it is one."""
+    import shutil
+    user_shell = os.environ.get("SHELL") or ""
+    if os.path.basename(user_shell) in ("bash", "sh", "zsh", "dash", "ash", "ksh") \
+            and os.access(user_shell, os.X_OK):
+        return user_shell
+    for name in ("bash", "sh"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return "/bin/sh"
 
 
 def _resolve(path_str: str, workdir: Path) -> Path:
@@ -174,12 +205,20 @@ def run_shell(command: str, timeout: int, workdir: Path) -> str:
     if bad:
         raise ToolError(f"refused: command matches blocked pattern '{bad}'")
     try:
+        env = dict(os.environ, DEBIAN_FRONTEND="noninteractive",
+                   GIT_TERMINAL_PROMPT="0", PAGER="cat", GIT_PAGER="cat")
         proc = subprocess.run(
             command, shell=True, cwd=str(workdir), capture_output=True,
-            text=True, timeout=max(5, min(timeout or 120, 300)),
-            executable=os.environ.get("SHELL") or "/bin/sh")
-    except subprocess.TimeoutExpired:
-        return f"[command timed out after {timeout}s and was killed]"
+            text=True, errors="replace", stdin=subprocess.DEVNULL, env=env,
+            timeout=max(5, min(timeout or 120, 600)),
+            executable=_shell_executable())
+    except subprocess.TimeoutExpired as exc:
+        out = (exc.stdout or b"")
+        out = out.decode("utf-8", "replace") if isinstance(out, bytes) else out
+        tail = ("\nOUTPUT SO FAR:\n" + _truncate(out.rstrip(), 2000)) if out.strip() else ""
+        return (f"[command timed out after {exc.timeout:.0f}s and was killed — "
+                f"it may have been waiting for input; use non-interactive flags "
+                f"like -y]{tail}")
     except OSError as exc:
         raise ToolError(f"failed to start shell: {exc}") from exc
 
